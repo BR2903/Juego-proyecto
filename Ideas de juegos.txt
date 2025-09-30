@@ -1,0 +1,87 @@
+🔹 Etapa 1: Juego base (ecosistema simple)
+
+Objetivo: tener un tablero con especies que interactúan.
+
+Tablero (mundo): matriz 2D.
+
+Especies: cada celda puede estar vacía o tener un individuo de cierta especie.
+
+Reglas básicas:
+
+Misma especie cerca → reproducción.
+
+Diferentes especies cerca → combate (se matan o gana una según su carácter).
+
+Individuos pacifistas pueden sobrevivir más tiempo si no hay enemigos.
+
+Evolución: si una especie sobrevive muchas generaciones, cambia su “gen” (ej: más resistente, más fértil, más agresiva).
+
+🔹 Etapa 2: Ampliación (civilizaciones)
+
+Objetivo: que algunas especies evolucionen en sociedades inteligentes.
+
+Civilización: surge cuando una especie alcanza cierta “antigüedad” o población mínima.
+
+Nuevas reglas:
+
+Construcción de aldeas/ciudades (pueden representarse como símbolos en el tablero).
+
+Competencia no solo entre individuos, sino entre grupos.
+
+Aparición de jerarquías: especies con gobierno, ejército, exploradores.
+
+🔹 Etapa 3: Viajes interplanetarios 🚀
+
+Objetivo: extender el juego a un mapa de planetas.
+
+Cada planeta = un tablero independiente (como el de Etapa 1).
+
+Civilizaciones avanzadas → pueden construir naves y colonizar otros planetas.
+
+Especies extraterrestres → aparecen en otros planetas con reglas distintas.
+
+Usuario (Dios):
+
+Puede decidir si deja que los mundos evolucionen solos.
+
+O intervenir (ej: crear nuevas especies, provocar catástrofes, acelerar evolución).
+
+🔹 Rol del usuario
+
+El jugador es Dios del universo:
+
+No controla una especie directamente.
+
+Puede observar, acelerar o interferir.
+
+Podría tener “acciones divinas”:
+
+Crear especies nuevas.
+
+Desatar plagas, catástrofes o bendiciones.
+
+Acelerar viajes interplanetarios.
+
+🔹 Estrategia de desarrollo
+
+Versión mínima (MVP):
+
+Un solo mundo.
+
+Varias especies con reproducción/combate.
+
+Simulación en consola (texto).
+
+Versión intermedia:
+
+Evolución de especies.
+
+Civilizaciones primitivas (ciudades, ejércitos).
+
+Versión avanzada:
+
+Varios planetas.
+
+Viajes espaciales.
+
+Especies alienígenas.
