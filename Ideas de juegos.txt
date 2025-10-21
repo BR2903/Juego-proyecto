@@ -30,22 +30,6 @@ Competencia no solo entre individuos, sino entre grupos.
 
 Aparición de jerarquías: especies con gobierno, ejército, exploradores.
 
-🔹 Etapa 3: Viajes interplanetarios 🚀
-
-Objetivo: extender el juego a un mapa de planetas.
-
-Cada planeta = un tablero independiente (como el de Etapa 1).
-
-Civilizaciones avanzadas → pueden construir naves y colonizar otros planetas.
-
-Especies extraterrestres → aparecen en otros planetas con reglas distintas.
-
-Usuario (Dios):
-
-Puede decidir si deja que los mundos evolucionen solos.
-
-O intervenir (ej: crear nuevas especies, provocar catástrofes, acelerar evolución).
-
 🔹 Rol del usuario
 
 El jugador es Dios del universo:
