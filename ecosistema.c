@@ -1,10 +1,3 @@
-// main.c — Simulador de vida (Windows console)
-// - Doble buffer sin parpadeo y robusto a cambios de tamaño de ventana.
-// - Muerte natural igual para A, B y C.
-// - Combate con ganador aleatorio 50/50.
-// - Brillo de "adultos" (más notorio) según edad.
-// - Guardado/carga en JSON (solo el mundo; la edad no se persiste).
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -12,6 +5,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <conio.h>
+#include <stdbool.h>
 
 #define ESPECIES 3
 #define VACIO 0
@@ -36,10 +30,10 @@ typedef struct {
 
 //==================== Doble buffer de consola (sin flicker) ==================
 typedef struct {
-    HANDLE front, back;     // buffers visibles/ocultos
-    HANDLE primary;         // STD_OUTPUT original
-    int buf_w, buf_h;       // tamaño actual del buffer
-    CHAR_INFO* canvas;      // lienzo temporal (buf_w*buf_h)
+    HANDLE front, back;     
+    HANDLE primary;         
+    int buf_w, buf_h;       
+    CHAR_INFO* canvas;      
 } DBConsole;
 
 static DBConsole gdb = {0};
@@ -66,9 +60,10 @@ static void hide_cursor(HANDLE h, BOOL vis) {
     CONSOLE_CURSOR_INFO ci = { .bVisible = vis, .dwSize = 100 };
     SetConsoleCursorInfo(h, &ci);
 }
-static int clampi(int v,int lo,int hi){ return v<lo?lo:(v>hi?hi:v); }
+static int clampi(int v, int lo, int hi) {
+    return (v < lo) ? lo : ((v > hi) ? hi : v);
+}// typo-safe
 
-// Tamaño visible actual (en chars) del buffer ACTIVO (gdb.front)
 static void get_active_window_size(int* out_w, int* out_h) {
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     if (!gdb.front || !GetConsoleScreenBufferInfo(gdb.front, &csbi)) {
@@ -80,7 +75,6 @@ static void get_active_window_size(int* out_w, int* out_h) {
     *out_h = (r.Bottom - r.Top + 1);
 }
 
-// Crea/recrea buffers si necesitamos CRECER (nunca encoge)
 static int db_ensure_buffers_at_least(int want_w, int want_h) {
     int grow = 0;
     if (!gdb.front || !gdb.back) grow = 1;
@@ -137,7 +131,6 @@ static void db_leave(void) {
     free(gdb.canvas); gdb.canvas = NULL;
 }
 
-// Inicia frame: dimensiona a max(visible, contenido) y limpia TODO
 static void db_begin_frame(int content_w, int content_h, int* out_w_used, int* out_h_used) {
     int vis_w=0, vis_h=0;
     if (gdb.front) get_active_window_size(&vis_w,&vis_h);
@@ -180,15 +173,16 @@ static void put_text(int x,int y,const char* s, WORD attr, int w, int h) {
     }
 }
 
-//======================== Parámetros de simulación ======================
+//================= Parámetros biológicos de las especies =====================
 // Prob. de reproducción por turno si hay pareja y hueco alrededor
-static float fecundidad[ESPECIES+1]       = { 0.0f, 0.18f, 0.15f, 0.12f };
-// Prob. de muerte natural por turno (IGUAL para A,B,C)
-static float longevidad_muerte[ESPECIES+1]= { 0.0f, 0.04f, 0.04f, 0.04f };
-// Prob. de intentar combatir si hay enemigo adyacente
-static float agresividad[ESPECIES+1]      = { 0.0f, 0.30f, 0.25f, 0.20f };
+// A: normal, B: normal, C: más alta (pacifista pero se reproduce más)
+static float fecundidad[ESPECIES+1]       = { 0.0f, 0.18f, 0.15f, 0.24f };
+// Prob. de muerte natural por turno (distinta para cada especie)
+// A: más mortal, B: normal, C: menos mortal
+static float longevidad_muerte[ESPECIES+1]= { 0.0f, 0.07f, 0.04f, 0.02f };
+// Tabla original de agresividad (ya no se usa para probabilidades, pero se mantiene)
+static float agresividad[ESPECIES+1]      = { 0.0f, 1.0f, 0.0f, 0.0f };
 
-//============================== UI y menú ============================
 int menu_simple(const char* titulo, const char* opciones[], int num_opciones) {
     int opcion;
     while (1) {
@@ -234,7 +228,6 @@ int leer_entero_en_rango(const char *prompt, int minv, int maxv) {
     }
 }
 
-//=========================== Nueva y cargar ===========================
 Partida partidas[MAX_PARTIDAS];
 int n_partidas = 0;
 
@@ -297,7 +290,6 @@ void cargar_partida() {
     if (guardar_partidas_json(JSON_PATH, partidas, n_partidas) != 0) { printf("No se pudo guardar en JSON.\n"); Sleep(1000); }
 }
 
-//=========================== Dibujo/UI sin flicker ===================
 static int textlen(const char* s){ return (int)strlen(s); }
 
 // Colores base sin intensidad; adultos añaden intensidad para “brillar”
@@ -343,31 +335,7 @@ static void draw_grid_into_canvas(const Partida* p, int highlight_i, int highlig
     }
 }
 
-static void draw_editor_frame(const Partida* p, int cx, int cy) {
-    char l0[256], l1[256], l2[160];
-    snprintf(l0,sizeof(l0),"Edicion del mundo '%s' (%dx%d)", p->nombre, p->filas, p->columnas);
-    snprintf(l1,sizeof(l1),"Cursor: (%d,%d)  | Coloca con 1/2/3, borra con 0", cx, cy);
-    snprintf(l2,sizeof(l2),"Controles: WASD-mover, 1/2/3-colocar, 0-eliminar, L-limpiar, ESC-salir");
-
-    int grid_w = p->columnas*2;
-    int content_w = grid_w;
-    if (textlen(l0)>content_w) content_w=textlen(l0);
-    if (textlen(l1)>content_w) content_w=textlen(l1);
-    if (textlen(l2)>content_w) content_w=textlen(l2);
-    int content_h = 3 + p->filas + 2;
-
-    int w_used=0,h_used=0;
-    db_begin_frame(content_w, content_h, &w_used, &h_used);
-
-    put_text(0,0,l0,COL_DEF,w_used,h_used);
-    put_text(0,1,l1,COL_DEF,w_used,h_used);
-    draw_grid_into_canvas(p, cx, cy, 0, 3, w_used, h_used);
-    put_text(0, 3+p->filas+1, l2, COL_DEF, w_used, h_used);
-
-    db_present(w_used,h_used);
-}
-
-static void draw_sim_frame(const Partida* p) {
+static void draw_sim_frame(const Partida* p, bool autoplay, int delay_ms) {
     char h0[256]; snprintf(h0,sizeof(h0),"Simulando partida '%s' (%dx%d)", p->nombre, p->filas, p->columnas);
 
     int c1=0,c2=0,c3=0;
@@ -376,7 +344,9 @@ static void draw_sim_frame(const Partida* p) {
         if (v==1) c1++; else if (v==2) c2++; else if (v==3) c3++;
     }
     char s1[256]; snprintf(s1,sizeof(s1),"Poblacion: A=%d  B=%d  C=%d  (Total=%d)", c1,c2,c3,c1+c2+c3);
-    char s2[256]; snprintf(s2,sizeof(s2),"Controles: 1-1 turno, 2-10 turnos, N-N turnos, E-evento, 3-editar, 4-salir");
+    double tps = (delay_ms>0) ? (1000.0/delay_ms) : 0.0;
+    char s2[256]; snprintf(s2,sizeof(s2),"AUTO: %s | Velocidad: %.2f tps (%d ms) | Controles: [SPACE] auto  [+/-] vel  [1] 1t  [2] 10t  [N] Nt  [E] evento  [3] editar  [4] salir",
+                           autoplay? "ON" : "OFF", tps, delay_ms);
 
     int grid_w=p->columnas*2;
     int content_w=grid_w;
@@ -396,12 +366,33 @@ static void draw_sim_frame(const Partida* p) {
     db_present(w_used,h_used);
 }
 
-//============================== Edición y simulación ==========================
 void editar_mundo(Partida *p) {
     int cx=0, cy=0;
     db_enter();
     for (int editing=1; editing; ) {
-        draw_editor_frame(p, cx, cy);
+        // Frame de edición
+        char l0[256], l1[256], l2[160];
+        snprintf(l0,sizeof(l0),"Edicion del mundo '%s' (%dx%d)", p->nombre, p->filas, p->columnas);
+        snprintf(l1,sizeof(l1),"Cursor: (%d,%d)  | Coloca con 1/2/3, borra con 0", cx, cy);
+        snprintf(l2,sizeof(l2),"Controles: WASD-mover, 1/2/3-colocar, 0-eliminar, L-limpiar, ESC-salir");
+
+        int grid_w = p->columnas*2;
+        int content_w = grid_w;
+        if ((int)strlen(l0)>content_w) content_w=(int)strlen(l0);
+        if ((int)strlen(l1)>content_w) content_w=(int)strlen(l1);
+        if ((int)strlen(l2)>content_w) content_w=(int)strlen(l2);
+        int content_h = 3 + p->filas + 2;
+
+        int w_used=0,h_used=0;
+        db_begin_frame(content_w, content_h, &w_used, &h_used);
+
+        put_text(0,0,l0,COL_DEF,w_used,h_used);
+        put_text(0,1,l1,COL_DEF,w_used,h_used);
+        draw_grid_into_canvas(p, cx, cy, 0, 3, w_used, h_used);
+        put_text(0, 3+p->filas+1, l2, COL_DEF, w_used, h_used);
+
+        db_present(w_used,h_used);
+
         int k = _getch();
         switch (k) {
             case 'w': case 'W': if (cx>0) cx--; break;
@@ -424,45 +415,107 @@ void editar_mundo(Partida *p) {
 
 void simular(Partida *p) {
     db_enter();
+    bool autoplay = false;
+    int delay_ms = 120;              
+    const int delay_min = 10;        
+    const int delay_max = 2000;      
+    ULONGLONG last_tick = GetTickCount64();
+
     for (int running=1; running; ) {
-        draw_sim_frame(p);
-        int tecla = _getch();
-        switch (tecla) {
-            case '1': avanzar_turno(p); break;
-            case '2': for (int t=0;t<10;t++) avanzar_turno(p); break;
-            case 'n': case 'N': {
-                db_leave();
-                int n = leer_entero_en_rango("Cuantos turnos avanzar?: ", 1, 100000000);
-                db_enter();
-                for (int t=0;t<n;t++) avanzar_turno(p);
-            } break;
-            case 'e': case 'E': {
-                db_leave();
-                const char* ops[]={"Plaga (-30% al azar)","Bendicion (+20% nac. por 10 turnos)","Volver"};
-                int eop = menu_simple("EVENTO DIVINO", ops, 3);
-                if (eop==0) {
-                    size_t total=(size_t)p->filas*(size_t)p->columnas;
-                    for (size_t k=0;k<total;k++)
-                        if (p->mundo[k]!=VACIO && (rand()/(float)RAND_MAX) < 0.30f) { p->mundo[k]=VACIO; if(p->edad) p->edad[k]=0; }
-                } else if (eop==1) {
-                    for (int t=0;t<10;t++){
-                        float a=fecundidad[1],b=fecundidad[2],c=fecundidad[3];
-                        fecundidad[1]=a+0.10f; fecundidad[2]=b+0.10f; fecundidad[3]=c+0.10f;
-                        avanzar_turno(p);
-                        fecundidad[1]=a; fecundidad[2]=b; fecundidad[3]=c;
+
+        // Avance automático si corresponde
+        if (autoplay) {
+            ULONGLONG now = GetTickCount64();
+            if (now - last_tick >= (ULONGLONG)delay_ms) {
+                avanzar_turno(p);
+                last_tick = now;
+            }
+        }
+
+        // Dibujo del frame de simulación (muestra estado de autoplay/velocidad)
+        draw_sim_frame(p, autoplay, delay_ms);
+
+        // Lectura no bloqueante de teclado
+        if (_kbhit()) {
+            int tecla = _getch();
+            switch (tecla) {
+                case ' ': // SPACE: toggle autoplay
+                    autoplay = !autoplay;
+                    last_tick = GetTickCount64();
+                    break;
+                case '+': case '=': // más rápido (menor delay)
+                    delay_ms -= (delay_ms >= 100) ? 50 : 5;
+                    if (delay_ms < delay_min) delay_ms = delay_min;
+                    break;
+                case '-': // más lento (mayor delay)
+                    delay_ms += (delay_ms >= 100) ? 50 : 5;
+                    if (delay_ms > delay_max) delay_ms = delay_max;
+                    break;
+
+                case '1':
+                    autoplay = false;
+                    avanzar_turno(p);
+                    last_tick = GetTickCount64();
+                    break;
+
+                case '2':
+                    autoplay = false;
+                    for (int t=0;t<10;t++) avanzar_turno(p);
+                    last_tick = GetTickCount64();
+                    break;
+
+                case 'n': case 'N': {
+                    autoplay = false;
+                    db_leave();
+                    int n = leer_entero_en_rango("Cuantos turnos avanzar?: ", 1, 100000000);
+                    db_enter();
+                    for (int t=0;t<n;t++) avanzar_turno(p);
+                    last_tick = GetTickCount64();
+                } break;
+
+                case 'e': case 'E': {
+                    autoplay = false;
+                    db_leave();
+                    const char* ops[]={"Plaga (-30% al azar)","Bendicion (+20%% nac. por 10 turnos)","Volver"};
+                    int eop = menu_simple("EVENTO DIVINO", ops, 3);
+                    if (eop==0) {
+                        size_t total=(size_t)p->filas*(size_t)p->columnas;
+                        for (size_t k=0;k<total;k++)
+                            if (p->mundo[k]!=VACIO && (rand()/(float)RAND_MAX) < 0.30f) { p->mundo[k]=VACIO; if(p->edad) p->edad[k]=0; }
+                    } else if (eop==1) {
+                        for (int t=0;t<10;t++){
+                            float a=fecundidad[1],b=fecundidad[2],c=fecundidad[3];
+                            fecundidad[1]=a+0.10f; fecundidad[2]=b+0.10f; fecundidad[3]=c+0.10f;
+                            avanzar_turno(p);
+                            fecundidad[1]=a; fecundidad[2]=b; fecundidad[3]=c;
+                        }
                     }
-                }
-                db_enter();
-            } break;
-            case '3': db_leave(); editar_mundo(p); db_enter(); break;
-            case '4': running=0; break;
+                    db_enter();
+                    last_tick = GetTickCount64();
+                } break;
+
+                case '3':
+                    autoplay = false;
+                    db_leave(); editar_mundo(p); db_enter();
+                    last_tick = GetTickCount64();
+                    break;
+
+                case '4':
+                    running=0; break;
+            }
+        } else {
+            // No hay teclado: si no hay autoplay, descansar un poco para no consumir CPU
+            if (!autoplay) Sleep(10);
         }
     }
     db_leave();
 }
 
 //================================= Motor del turno ============================
-// Combate 50/50: moneda al aire entre celda actual y rival elegido.
+// Combate modificado:
+//  - A: siempre ataca si hay enemigos y tiene más probabilidad de ganar.
+//  - B: nunca inicia combate, solo participa como defensora cuando la atacan.
+//  - C: pacifista total, nunca inicia combate y nunca gana (si la atacan, muere).
 void avanzar_turno(Partida *p) {
     size_t total = (size_t)p->filas * (size_t)p->columnas;
     int *nuevo      = (int*)malloc(total*sizeof(int));
@@ -480,7 +533,7 @@ void avanzar_turno(Partida *p) {
         int especie = p->mundo[idx];
         if (especie==VACIO) continue;
 
-        // 1) Muerte natural (igual para todas)
+        // 1) Muerte natural (depende de la especie)
         if ((rand()/(float)RAND_MAX) < longevidad_muerte[especie]) {
             nuevo[idx]=VACIO; edad_nueva[idx]=0; continue;
         }
@@ -505,13 +558,47 @@ void avanzar_turno(Partida *p) {
             }
         }
 
-        // 3) Combate 50/50 si hay enemigos y pasa agresividad
-        if (n_enem>0 && (rand()/(float)RAND_MAX) < agresividad[especie]) {
+        // 3) Combate según especie
+        bool puede_atacar = false;
+        if (especie == 1) {
+            // A: siempre que vea otra especie, ataca
+            puede_atacar = (n_enem > 0);
+        } else if (especie == 2) {
+            // B: nunca inicia combates
+            puede_atacar = false;
+        } else if (especie == 3) {
+            // C: pacifista, nunca ataca
+            puede_atacar = false;
+        }
+
+        if (puede_atacar && n_enem > 0) {
+            // Elegir enemigo al azar
             int r = rand()%n_enem;
             int ei = enem_i[r], ej = enem_j[r];
             int eidx = IDX(p,ei,ej);
+            int especie_rival = p->mundo[eidx];
 
-            if ((rand() & 1) == 0) {
+            // Probabilidad de que la celda actual gane el combate
+            float prob_ganar_actual = 0.5f;
+
+            if (especie == 1) {
+                // A agresiva: más probabilidad de ganar
+                prob_ganar_actual = 0.7f;
+            } else if (especie == 2) {
+                prob_ganar_actual = 0.5f; // por si en algún futuro se le deja atacar
+            } else if (especie == 3) {
+                // C no mata a nadie
+                prob_ganar_actual = 0.0f;
+            }
+
+            // C pacifista incluso como rival: nunca gana un combate
+            // Si el rival es C, el atacante siempre gana
+            if (especie_rival == 3) {
+                prob_ganar_actual = 1.0f;
+            }
+
+            float r2 = rand()/(float)RAND_MAX;
+            if (r2 < prob_ganar_actual) {
                 // Gana el actual -> muere el rival
                 nuevo[eidx] = VACIO;
                 if (p->edad) edad_nueva[eidx]=0;
